@@ -1,0 +1,16 @@
+{
+  "name": "shopmart",
+  "version": "1.0.0",
+  "description": "ShopMart - Full-stack e-commerce app",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sql.js": "^1.10.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

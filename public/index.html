@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>shopmart</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..800&family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: 'Inter', sans-serif; overscroll-behavior-y: contain; }
+  input, select, button { font-family: 'Inter', sans-serif; }
+  ::-webkit-scrollbar { display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect, useCallback } = React;
+
+const API = "/api";
+
+async function api(path, opts = {}) {
+  const token = localStorage.getItem("shopmart_token");
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(API + path, { ...opts, headers: { ...headers, ...opts.headers } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+const CATS = ["All", "Electronics", "Home & Kitchen", "Fashion", "Books", "Toys & Games", "Beauty"];
+const CAT_ACCENT = {
+  "Electronics": { bg: "#EAF1F0", text: "#2A5450" },
+  "Home & Kitchen": { bg: "#FCF3E3", text: "#7A5A1E" },
+  "Fashion": { bg: "#FBEAE4", text: "#7C3B27" },
+  "Books": { bg: "#EDEBF7", text: "#3B3260" },
+  "Toys & Games": { bg: "#E8F2E7", text: "#33582F" },
+  "Beauty": { bg: "#FBEAF0", text: "#75324D" },
+};
+
+function money(n) { return "$" + n.toFixed(2); }
+
+function StarRow({ rating, reviews, size }) {
+  size = size || 12;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ display: "flex", gap: 1 }}>
+        {[1,2,3,4,5].map((i) => <span key={i} style={{ color: i <= Math.round(rating) ? "#C6912F" : "#D9D5C6", fontSize: size }}>★</span>)}
+      </div>
+      <span style={{ fontSize: 11.5, color: "#6B6858" }}>{rating.toFixed(1)} ({reviews > 999 ? (reviews/1000).toFixed(1) + "k" : reviews})</span>
+    </div>
+  );
+}
+
+function PriceStamp({ price, was, size }) {
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: size || 18, color: "#1B1F3B" }}>{money(price)}</span>
+      {was && <span style={{ fontSize: 12, color: "#948F7C", textDecoration: "line-through" }}>{money(was)}</span>}
+    </div>
+  );
+}
+
+function Badge({ text }) {
+  const c = text === "Deal" ? { bg: "#E4623F", fg: "#fff" } : { bg: "#1B1F3B", fg: "#F1EAD9" };
+  return <span style={{ position: "absolute", top: 8, left: 0, background: c.bg, color: c.fg, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.3, padding: "3px 8px", borderRadius: "0 3px 3px 0", textTransform: "uppercase", zIndex: 2 }}>{text}</span>;
+}
+
+function Sheet({ open, onClose, title, children, heightVh }) {
+  if (!open) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 80 }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.4)" }} />
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, background: "#F6F3EA", borderRadius: "16px 16px 0 0", maxHeight: (heightVh || 75) + "vh", display: "flex", flexDirection: "column", boxShadow: "0 -8px 24px rgba(0,0,0,0.2)" }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: "10px 0 4px" }}><div style={{ width: 36, height: 4, borderRadius: 2, background: "#D8D5C4" }} /></div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 18px 12px", borderBottom: "1px solid #E4E1D3" }}>
+          <span style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 17 }}>{title}</span>
+          <button onClick={onClose} style={{ background: "#EAE6D8", border: "none", borderRadius: "50%", width: 30, height: 30, fontSize: 15, cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ overflowY: "auto", padding: 18 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function AuthScreen({ onLogin }) {
+  const [mode, setMode] = useState("login");
+  const [form, setForm] = useState({ name: "", email: "", username: "", password: "", confirm: "" });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const inputStyle = { border: "1px solid #D8D5C4", borderRadius: 8, padding: "13px 14px", fontSize: 16, outline: "none", width: "100%" };
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      if (mode === "signup") {
+        if (!form.name || !form.email || !form.username || !form.password) { setError("Please fill in every field."); setLoading(false); return; }
+        if (form.password !== form.confirm) { setError("Passwords don't match."); setLoading(false); return; }
+        const data = await api("/auth/signup", { method: "POST", body: JSON.stringify({ username: form.username, name: form.name, email: form.email, password: form.password }) });
+        localStorage.setItem("shopmart_token", data.token);
+        onLogin(data.user);
+      } else {
+        if (!form.username || !form.password) { setError("Please enter username and password."); setLoading(false); return; }
+        const data = await api("/auth/login", { method: "POST", body: JSON.stringify({ username: form.username, password: form.password }) });
+        localStorage.setItem("shopmart_token", data.token);
+        onLogin(data.user);
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#1B1F3B", display: "flex", flexDirection: "column", justifyContent: "center", padding: 24, maxWidth: 480, margin: "0 auto" }}>
+      <div style={{ textAlign: "center", marginBottom: 28 }}>
+        <div style={{ fontFamily: "Fraunces, serif", fontWeight: 800, fontSize: 30, color: "#F1EAD9" }}>shop<span style={{ color: "#D9A441" }}>mart</span></div>
+        <div style={{ color: "#B9B49C", fontSize: 13, marginTop: 6 }}>The weekend bazaar</div>
+      </div>
+      <div style={{ background: "#F6F3EA", borderRadius: 16, padding: 24 }}>
+        <div style={{ display: "flex", background: "#EAE6D8", borderRadius: 10, padding: 4, marginBottom: 20 }}>
+          <button onClick={() => { setMode("login"); setError(""); }} style={{ flex: 1, background: mode === "login" ? "#1B1F3B" : "transparent", color: mode === "login" ? "#F1EAD9" : "#5C594A", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13.5 }}>Log in</button>
+          <button onClick={() => { setMode("signup"); setError(""); }} style={{ flex: 1, background: mode === "signup" ? "#1B1F3B" : "transparent", color: mode === "signup" ? "#F1EAD9" : "#5C594A", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13.5 }}>Sign up</button>
+        </div>
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
+          {mode === "signup" && (
+            <>
+              <input placeholder="Full name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
+              <input placeholder="Email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} style={inputStyle} />
+            </>
+          )}
+          <input placeholder="Username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} style={inputStyle} autoCapitalize="none" />
+          <input placeholder="Password" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} style={inputStyle} />
+          {mode === "signup" && <input placeholder="Confirm password" type="password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} style={inputStyle} />}
+          {error && <div style={{ color: "#C9603E", fontSize: 12.5, fontWeight: 600 }}>{error}</div>}
+          <button type="submit" disabled={loading} style={{ background: "#D9A441", color: "#1B1F3B", border: "none", borderRadius: 8, padding: "14px 0", fontWeight: 700, fontSize: 15, marginTop: 6, opacity: loading ? 0.6 : 1 }}>
+            {loading ? "Please wait..." : mode === "login" ? "Log in" : "Create account"}
+          </button>
+        </form>
+      </div>
+      <div style={{ textAlign: "center", color: "#8A8672", fontSize: 11, marginTop: 18 }}>
+        Log in for daily offers and discounts.
+      </div>
+    </div>
+  );
+}
+
+function ShopMart() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [products, setProducts] = useState([]);
+
+  const [view, setView] = useState("home");
+  const [cart, setCart] = useState({});
+  const [wishlist, setWishlist] = useState(new Set());
+  const [orders, setOrders] = useState([]);
+  const [address, setAddress] = useState({ full_name: "", street: "", city: "", zip: "", card: "" });
+
+  const [cartOpen, setCartOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("All");
+  const [sortBy, setSortBy] = useState("featured");
+  const [maxPrice, setMaxPrice] = useState(250);
+  const [minRating, setMinRating] = useState(0);
+  const [lastOrder, setLastOrder] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    fetch(API + "/products").then((r) => r.json()).then((d) => setProducts(d.products || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    async function checkSession() {
+      const token = localStorage.getItem("shopmart_token");
+      if (!token) { setAuthChecked(true); return; }
+      try {
+        const data = await api("/auth/me");
+        setCurrentUser(data.user);
+        await loadUserData();
+      } catch {
+        localStorage.removeItem("shopmart_token");
+      }
+      setAuthChecked(true);
+    }
+    checkSession();
+  }, []);
+
+  async function loadUserData() {
+    try {
+      const [cartRes, wishRes, orderRes, addrRes] = await Promise.all([
+        api("/cart"),
+        api("/wishlist"),
+        api("/orders"),
+        api("/address"),
+      ]);
+      const cartMap = {};
+      cartRes.cart.forEach((i) => { cartMap[i.product_id] = i.quantity; });
+      setCart(cartMap);
+      setWishlist(new Set(wishRes.wishlist));
+      setOrders(orderRes.orders.map((o) => ({ ...o, date: new Date(o.date) })));
+      setAddress(addrRes.address);
+    } catch (err) {
+      console.error("Failed to load user data:", err);
+    }
+  }
+
+  async function handleLogin(user) {
+    setCurrentUser(user);
+    await loadUserData();
+    setView("home");
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("shopmart_token");
+    setCurrentUser(null);
+    setCart({}); setWishlist(new Set()); setOrders([]); setAddress({ full_name: "", street: "", city: "", zip: "", card: "" });
+    setView("home");
+  }
+
+  function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 1600); }
+
+  async function addToCart(id) {
+    setCart((c) => ({ ...c, [id]: (c[id] || 0) + 1 }));
+    showToast("Added to cart");
+    try { await api("/cart", { method: "POST", body: JSON.stringify({ productId: id }) }); } catch (e) { console.error(e); }
+  }
+
+  async function setQty(id, qty) {
+    setCart((c) => { const n = { ...c }; if (qty <= 0) delete n[id]; else n[id] = qty; return n; });
+    try { await api("/cart/" + id, { method: "PUT", body: JSON.stringify({ quantity: qty }) }); } catch (e) { console.error(e); }
+  }
+
+  async function removeFromCart(id) {
+    setCart((c) => { const n = { ...c }; delete n[id]; return n; });
+    try { await api("/cart/" + id, { method: "DELETE" }); } catch (e) { console.error(e); }
+  }
+
+  async function toggleWishlist(id) {
+    const inWish = wishlist.has(id);
+    setWishlist((w) => { const n = new Set(w); inWish ? n.delete(id) : n.add(id); return n; });
+    try { await api("/wishlist/" + id, { method: "POST" }); } catch (e) { console.error(e); }
+  }
+
+  const cartItems = useMemo(() => Object.entries(cart).map(([id, qty]) => {
+    const p = products.find((x) => x.id === Number(id));
+    return p ? { ...p, qty } : null;
+  }).filter(Boolean), [cart, products]);
+  const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
+  const subtotal = cartItems.reduce((s, i) => s + i.price * i.qty, 0);
+  const shipping = subtotal > 35 || subtotal === 0 ? 0 : 4.99;
+  const tax = subtotal * 0.0725;
+  const total = subtotal + shipping + tax;
+
+  const filtered = useMemo(() => {
+    let list = products.filter((p) => (category === "All" || p.category === category) && p.price <= maxPrice && p.rating >= minRating && p.name.toLowerCase().includes(query.toLowerCase()));
+    if (sortBy === "priceLow") list = [...list].sort((a, b) => a.price - b.price);
+    else if (sortBy === "priceHigh") list = [...list].sort((a, b) => b.price - a.price);
+    else if (sortBy === "rating") list = [...list].sort((a, b) => b.rating - a.rating);
+    return list;
+  }, [query, category, sortBy, maxPrice, minRating, products]);
+
+  function openProduct(p) { setSelectedProduct(p); setView("product"); window.scrollTo(0, 0); }
+
+  async function placeOrder(e) {
+    e.preventDefault();
+    if (!address.full_name || !address.street || !address.city || !address.zip || !address.card) { showToast("Fill in all fields"); return; }
+    try {
+      await api("/address", { method: "PUT", body: JSON.stringify(address) });
+      const data = await api("/orders", { method: "POST" });
+      setLastOrder({ ...data.order, date: new Date() });
+      setCart({});
+      setOrders((o) => [{ ...data.order, date: new Date() }, ...o]);
+      setView("confirmation");
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  const inputStyle = { border: "1px solid #D8D5C4", borderRadius: 8, padding: "13px 14px", fontSize: 16, outline: "none", width: "100%" };
+  const navBtn = (active) => ({ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, color: active ? "#1B1F3B" : "#9C9885", fontSize: 10, fontWeight: 600, cursor: "pointer", flex: 1, padding: "6px 0", position: "relative" });
+
+  function SummaryRow({ label, value, bold }) {
+    return <div style={{ display: "flex", justifyContent: "space-between", fontSize: bold ? 15 : 13.5, fontWeight: bold ? 700 : 400, marginBottom: 8, color: bold ? "#22241F" : "#5C594A" }}><span>{label}</span><span>{value === 0 ? "FREE" : money(value)}</span></div>;
+  }
+
+  if (!authChecked) return null;
+  if (!currentUser) return <AuthScreen onLogin={handleLogin} />;
+
+  return (
+    <div style={{ fontFamily: "Inter, sans-serif", background: "#EEF1EE", minHeight: "100vh", color: "#22241F", maxWidth: 480, margin: "0 auto", position: "relative", paddingBottom: 66 }}>
+
+      <header style={{ background: "#1B1F3B", color: "#F1EAD9", position: "sticky", top: 0, zIndex: 40 }}>
+        <div style={{ padding: "12px 14px 8px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div onClick={() => setView("home")} style={{ cursor: "pointer", fontFamily: "Fraunces, serif", fontWeight: 800, fontSize: 21 }}>shop<span style={{ color: "#D9A441" }}>mart</span></div>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setView("profile")} style={{ background: "#D9A441", color: "#1B1F3B", border: "none", borderRadius: "50%", width: 30, height: 30, fontWeight: 700, fontSize: 13 }}>
+            {currentUser.name ? currentUser.name[0].toUpperCase() : "U"}
+          </button>
+        </div>
+        <div style={{ padding: "0 14px 10px", display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", background: "#F1EAD9", borderRadius: 8, overflow: "hidden" }}>
+            <span style={{ marginLeft: 10, color: "#7A7660", fontSize: 15 }}>🔍</span>
+            <input value={query} onChange={(e) => { setQuery(e.target.value); setView("home"); }} placeholder="Search shopmart" style={{ border: "none", outline: "none", padding: "10px 8px", flex: 1, fontSize: 15, background: "transparent", color: "#22241F", minWidth: 0 }} />
+          </div>
+        </div>
+        <div style={{ background: "#252A4D", overflowX: "auto", whiteSpace: "nowrap", padding: "8px 14px" }}>
+          {CATS.map((c) => (
+            <button key={c} onClick={() => { setCategory(c); setView("home"); }} style={{ background: category === c ? "#D9A441" : "transparent", border: category === c ? "none" : "1px solid #454B78", color: category === c ? "#1B1F3B" : "#D8D5C4", fontWeight: 600, fontSize: 12.5, padding: "5px 12px", borderRadius: 999, marginRight: 8, cursor: "pointer" }}>{c}</button>
+          ))}
+        </div>
+      </header>
+
+      {toast && <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 100, background: "#1B1F3B", color: "#F1EAD9", padding: "9px 16px", borderRadius: 8, fontSize: 13, boxShadow: "0 6px 18px rgba(0,0,0,0.25)" }}>✓ {toast}</div>}
+
+      {view === "home" && (
+        <main style={{ padding: "14px 14px 20px" }}>
+          {!query && category === "All" && (
+            <div style={{ background: "linear-gradient(120deg,#1B1F3B,#2E3564)", borderRadius: 14, color: "#F1EAD9", padding: "22px 18px", marginBottom: 16 }}>
+              <div style={{ color: "#D9A441", fontWeight: 700, fontSize: 11, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>Welcome back{currentUser.name ? ", " + currentUser.name.split(" ")[0] : ""}</div>
+              <div style={{ fontFamily: "Fraunces, serif", fontSize: 21, fontWeight: 700, marginBottom: 6, lineHeight: 1.2 }}>Everything you need, priced to move.</div>
+              <div style={{ color: "#C9C5B0", fontSize: 13, lineHeight: 1.5 }}>Free delivery on orders over $35 🛍️</div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            <button onClick={() => setFilterOpen(true)} style={{ flex: 1, background: "#fff", border: "1px solid #D8D5C4", borderRadius: 8, padding: "10px 0", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🧰 Filter & Sort</button>
+            <div style={{ background: "#fff", border: "1px solid #D8D5C4", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#5C594A", whiteSpace: "nowrap" }}>{filtered.length} items</div>
+          </div>
+          {filtered.length === 0 ? (
+            <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#6B6858", fontSize: 13.5 }}>No products match. Try adjusting filters.</div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              {filtered.map((p) => {
+                const accent = CAT_ACCENT[p.category];
+                return (
+                  <div key={p.id} onClick={() => openProduct(p)} style={{ background: "#fff", borderRadius: 10, position: "relative", overflow: "hidden", border: "1px solid #E4E1D3", cursor: "pointer" }}>
+                    {p.badge && <Badge text={p.badge} />}
+                    <button onClick={(e) => { e.stopPropagation(); toggleWishlist(p.id); }} style={{ position: "absolute", top: 6, right: 6, zIndex: 3, background: "rgba(255,255,255,0.9)", border: "none", borderRadius: "50%", width: 28, height: 28, fontSize: 14, cursor: "pointer" }}>
+                      <span style={{ color: wishlist.has(p.id) ? "#C9603E" : "#8A8672" }}>{wishlist.has(p.id) ? "♥" : "♡"}</span>
+                    </button>
+                    <div style={{ background: accent.bg, height: 100, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40 }}>{p.emoji}</div>
+                    <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 5 }}>
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: accent.text, textTransform: "uppercase" }}>{p.category}</span>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.3, minHeight: 32 }}>{p.name}</div>
+                      <StarRow rating={p.rating} reviews={p.reviews} />
+                      <PriceStamp price={p.price} was={p.was} size={16} />
+                      <button onClick={(e) => { e.stopPropagation(); addToCart(p.id); }} style={{ marginTop: 4, background: "#1B1F3B", color: "#F1EAD9", border: "none", borderRadius: 6, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Add to cart</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      )}
+
+      {view === "product" && selectedProduct && (
+        <main style={{ paddingBottom: 90 }}>
+          <div style={{ padding: "12px 14px" }}><button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#3F7C74", fontSize: 13.5, fontWeight: 600, cursor: "pointer" }}>← Back</button></div>
+          <div style={{ background: CAT_ACCENT[selectedProduct.category].bg, height: 220, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 96 }}>{selectedProduct.emoji}</div>
+          <div style={{ background: "#fff", borderRadius: "16px 16px 0 0", marginTop: -16, padding: 20, position: "relative" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: CAT_ACCENT[selectedProduct.category].text, textTransform: "uppercase" }}>{selectedProduct.category}</span>
+            <h1 style={{ fontFamily: "Fraunces, serif", fontSize: 20, fontWeight: 700, margin: "6px 0 8px" }}>{selectedProduct.name}</h1>
+            <StarRow rating={selectedProduct.rating} reviews={selectedProduct.reviews} size={14} />
+            <div style={{ margin: "14px 0" }}><PriceStamp price={selectedProduct.price} was={selectedProduct.was} size={22} /></div>
+            <p style={{ fontSize: 13.5, color: "#5C594A", lineHeight: 1.6, marginBottom: 16 }}>{selectedProduct.desc}</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5, color: "#5C594A", marginBottom: 16, background: "#F6F3EA", borderRadius: 10, padding: 12 }}>
+              <div>🚚 {selectedProduct.price > 35 ? "Free delivery" : "$4.99 delivery"}</div>
+              <div>🔄 30-day returns</div>
+              <div>✅ Secure checkout</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: selectedProduct.stock < 15 ? "#C9603E" : "#3F7C74", fontWeight: 600 }}>{selectedProduct.stock < 15 ? "Only " + selectedProduct.stock + " left in stock" : "In stock"}</div>
+          </div>
+          <div style={{ position: "fixed", bottom: 66, left: 0, right: 0, maxWidth: 480, margin: "0 auto", background: "#fff", borderTop: "1px solid #E4E1D3", padding: 12, display: "flex", gap: 10, zIndex: 30 }}>
+            <button onClick={() => toggleWishlist(selectedProduct.id)} style={{ background: "#F6F3EA", border: "1px solid #D8D5C4", borderRadius: 8, width: 46, fontSize: 17, cursor: "pointer" }}>{wishlist.has(selectedProduct.id) ? "♥" : "♡"}</button>
+            <button onClick={() => addToCart(selectedProduct.id)} style={{ flex: 1, background: "#1B1F3B", color: "#F1EAD9", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>Add to cart</button>
+            <button onClick={() => { addToCart(selectedProduct.id); setView("checkout"); }} style={{ flex: 1, background: "#D9A441", color: "#1B1F3B", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>Buy now</button>
+          </div>
+        </main>
+      )}
+
+      {view === "checkout" && (
+        <main style={{ padding: "16px 14px 30px" }}>
+          <h1 style={{ fontFamily: "Fraunces, serif", fontSize: 21, fontWeight: 700, marginBottom: 16 }}>Checkout</h1>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, marginBottom: 14 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 10 }}>Order summary</div>
+            {cartItems.map((i) => <div key={i.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 6, color: "#5C594A" }}><span>{i.emoji} {i.name} × {i.qty}</span><span>{money(i.price * i.qty)}</span></div>)}
+            <hr style={{ border: "none", borderTop: "1px solid #E4E1D3", margin: "10px 0" }} />
+            <SummaryRow label="Subtotal" value={subtotal} />
+            <SummaryRow label="Shipping" value={shipping} />
+            <SummaryRow label="Tax" value={tax} />
+            <hr style={{ border: "none", borderTop: "1px solid #E4E1D3", margin: "10px 0" }} />
+            <SummaryRow label="Total" value={total} bold />
+          </div>
+          <form onSubmit={placeOrder} style={{ background: "#fff", borderRadius: 10, padding: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 10 }}>📍 Shipping address</div>
+            <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
+              <input placeholder="Full name" value={address.full_name} onChange={(e) => setAddress({ ...address, full_name: e.target.value })} style={inputStyle} />
+              <input placeholder="Street address" value={address.street} onChange={(e) => setAddress({ ...address, street: e.target.value })} style={inputStyle} />
+              <div style={{ display: "flex", gap: 10 }}>
+                <input placeholder="City" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })} style={{ ...inputStyle, flex: 1 }} />
+                <input placeholder="ZIP" value={address.zip} onChange={(e) => setAddress({ ...address, zip: e.target.value })} style={{ ...inputStyle, width: 100 }} />
+              </div>
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 10 }}>💳 Payment</div>
+            <input placeholder="Card number" value={address.card} onChange={(e) => setAddress({ ...address, card: e.target.value })} style={{ ...inputStyle, marginBottom: 18 }} />
+            <button type="submit" style={{ width: "100%", background: "#D9A441", color: "#1B1F3B", border: "none", borderRadius: 8, padding: "14px 0", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>Place order — {money(total)}</button>
+          </form>
+        </main>
+      )}
+
+      {view === "confirmation" && lastOrder && (
+        <main style={{ padding: "40px 20px", textAlign: "center" }}>
+          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#E8F2E7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", fontSize: 24, color: "#4E8A4A" }}>✓</div>
+          <h1 style={{ fontFamily: "Fraunces, serif", fontSize: 21, fontWeight: 700, marginBottom: 8 }}>Order placed</h1>
+          <p style={{ color: "#5C594A", fontSize: 13, marginBottom: 20 }}>Confirmation <strong>{lastOrder.id}</strong> — arriving by {new Date(Date.now() + 5 * 86400000).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}.</p>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, textAlign: "left", marginBottom: 20 }}>
+            {lastOrder.items.map((i, idx) => <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, marginBottom: 6 }}><span>{i.emoji} {i.name} × {i.quantity}</span><span>{money(i.price * i.quantity)}</span></div>)}
+            <hr style={{ border: "none", borderTop: "1px solid #E4E1D3", margin: "10px 0" }} />
+            <SummaryRow label="Total" value={lastOrder.total} bold />
+          </div>
+          <button onClick={() => setView("home")} style={{ background: "#1B1F3B", color: "#F1EAD9", border: "none", borderRadius: 8, padding: "12px 26px", fontWeight: 700, fontSize: 13.5, cursor: "pointer" }}>Continue shopping</button>
+        </main>
+      )}
+
+      {view === "orders" && (
+        <main style={{ padding: "16px 14px 30px" }}>
+          <h1 style={{ fontFamily: "Fraunces, serif", fontSize: 21, fontWeight: 700, marginBottom: 16 }}>Your orders</h1>
+          {orders.length === 0 ? (
+            <div style={{ background: "#fff", borderRadius: 10, padding: 40, textAlign: "center", color: "#6B6858", fontSize: 13.5 }}>📦<div style={{ marginTop: 6 }}>No orders yet.</div></div>
+          ) : orders.map((o, idx) => (
+            <div key={idx} style={{ background: "#fff", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 12, color: "#6B6858" }}><span>{o.id} · {o.date.toLocaleDateString()}</span><span style={{ fontWeight: 700, color: "#22241F" }}>{money(o.total)}</span></div>
+              {o.items.map((i, iidx) => <div key={iidx} style={{ fontSize: 12.5, marginBottom: 3 }}>{i.emoji} {i.name} × {i.quantity}</div>)}
+            </div>
+          ))}
+        </main>
+      )}
+
+      {view === "profile" && (
+        <main style={{ padding: "16px 14px 30px" }}>
+          <h1 style={{ fontFamily: "Fraunces, serif", fontSize: 21, fontWeight: 700, marginBottom: 16 }}>Your account</h1>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 18, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 46, height: 46, borderRadius: "50%", background: "#D9A441", color: "#1B1F3B", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 18 }}>{currentUser.name ? currentUser.name[0].toUpperCase() : "U"}</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15 }}>{currentUser.name}</div>
+                <div style={{ fontSize: 12.5, color: "#6B6858" }}>@{currentUser.username}</div>
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: "#5C594A", marginBottom: 4 }}>Email: {currentUser.email}</div>
+            <div style={{ fontSize: 13, color: "#5C594A" }}>Orders placed: {orders.length}</div>
+          </div>
+          <button onClick={handleLogout} style={{ width: "100%", background: "#fff", border: "1px solid #C9603E", color: "#C9603E", borderRadius: 8, padding: "13px 0", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Log out</button>
+        </main>
+      )}
+
+      <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 480, margin: "0 auto", background: "#fff", borderTop: "1px solid #E4E1D3", display: "flex", zIndex: 50, boxShadow: "0 -2px 10px rgba(0,0,0,0.05)" }}>
+        <button onClick={() => setView("home")} style={navBtn(view === "home")}><span style={{ fontSize: 18 }}>🏠</span>Home</button>
+        <button onClick={() => setFilterOpen(true)} style={navBtn(filterOpen)}><span style={{ fontSize: 18 }}>🧰</span>Filter</button>
+        <button onClick={() => setCartOpen(true)} style={navBtn(cartOpen)}>
+          <span style={{ fontSize: 18, position: "relative" }}>🛒{cartCount > 0 && <span style={{ position: "absolute", top: -6, right: -10, background: "#D9A441", color: "#1B1F3B", fontSize: 9.5, fontWeight: 700, borderRadius: 999, minWidth: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{cartCount}</span>}</span>Cart
+        </button>
+        <button onClick={() => setView("orders")} style={navBtn(view === "orders")}><span style={{ fontSize: 18 }}>📦</span>Orders</button>
+        <button onClick={() => setView("profile")} style={navBtn(view === "profile")}><span style={{ fontSize: 18 }}>👤</span>Profile</button>
+      </nav>
+
+      <Sheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter & Sort">
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#6B6858", textTransform: "uppercase", marginBottom: 8 }}>Sort by</div>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...inputStyle, background: "#fff" }}>
+            <option value="featured">Featured</option>
+            <option value="priceLow">Price: low to high</option>
+            <option value="priceHigh">Price: high to low</option>
+            <option value="rating">Avg. customer rating</option>
+          </select>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#6B6858", textTransform: "uppercase", marginBottom: 8 }}>Category</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {CATS.map((c) => <button key={c} onClick={() => setCategory(c)} style={{ background: category === c ? "#1B1F3B" : "#fff", color: category === c ? "#F1EAD9" : "#5C594A", border: "1px solid #D8D5C4", borderRadius: 999, padding: "7px 13px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{c}</button>)}
+          </div>
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#6B6858", textTransform: "uppercase", marginBottom: 8 }}>Max price: {money(maxPrice)}</div>
+          <input type="range" min={10} max={250} value={maxPrice} onChange={(e) => setMaxPrice(Number(e.target.value))} style={{ width: "100%" }} />
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "#6B6858", textTransform: "uppercase", marginBottom: 8 }}>Min rating</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[0, 3, 4, 4.5].map((r) => <button key={r} onClick={() => setMinRating(r)} style={{ flex: 1, background: minRating === r ? "#C9603E" : "#fff", color: minRating === r ? "#fff" : "#5C594A", border: "1px solid #D8D5C4", borderRadius: 8, padding: "8px 0", fontSize: 12, cursor: "pointer" }}>{r === 0 ? "Any" : r + "+"}</button>)}
+          </div>
+        </div>
+        <button onClick={() => setFilterOpen(false)} style={{ width: "100%", background: "#D9A441", color: "#1B1F3B", border: "none", borderRadius: 8, padding: "13px 0", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Show {filtered.length} results</button>
+      </Sheet>
+
+      <Sheet open={cartOpen} onClose={() => setCartOpen(false)} title={"Your cart (" + cartCount + ")"} heightVh={85}>
+        {cartItems.length === 0 ? (
+          <div style={{ textAlign: "center", color: "#8A8672", padding: "30px 0", fontSize: 13.5 }}>Your cart is empty.</div>
+        ) : (
+          <>
+            {cartItems.map((i) => (
+              <div key={i.id} style={{ display: "flex", gap: 12, background: "#fff", borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                <div style={{ background: CAT_ACCENT[i.category].bg, borderRadius: 6, width: 50, height: 50, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>{i.emoji}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.name}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1B1F3B", marginBottom: 6 }}>{money(i.price)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button onClick={() => setQty(i.id, i.qty - 1)} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #D8D5C4", background: "#fff", cursor: "pointer" }}>−</button>
+                    <span style={{ fontSize: 13, minWidth: 16, textAlign: "center" }}>{i.qty}</span>
+                    <button onClick={() => setQty(i.id, i.qty + 1)} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #D8D5C4", background: "#fff", cursor: "pointer" }}>+</button>
+                    <button onClick={() => removeFromCart(i.id)} style={{ marginLeft: "auto", background: "none", border: "none", color: "#C9603E", fontSize: 15, cursor: "pointer" }}>🗑</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <div style={{ background: "#fff", borderRadius: 8, padding: 14, marginTop: 6 }}>
+              <SummaryRow label="Subtotal" value={subtotal} />
+              <div style={{ fontSize: 11, color: "#3F7C74", marginBottom: 12 }}>{shipping === 0 ? "Free delivery included" : "Add " + money(35 - subtotal) + " more for free delivery"}</div>
+              <button onClick={() => { setCartOpen(false); setView("checkout"); }} style={{ width: "100%", background: "#D9A441", color: "#1B1F3B", border: "none", borderRadius: 8, padding: "13px 0", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Proceed to checkout</button>
+            </div>
+          </>
+        )}
+      </Sheet>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ShopMart />);
+</script>
+</body>
+</html>
